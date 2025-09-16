@@ -1,20 +1,22 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { usePomodoroTimer, formatTime } from './hooks/usePomodoroTimer.js';
 
 export default function App() {
-  const { mode, secondsLeft, isRunning, start, pause, reset, workDuration, breakDuration, updateDurations } = usePomodoroTimer();
+  const { mode, secondsLeft, isRunning, start, pause, reset, workDuration, breakDuration, updateDurations, progress } = usePomodoroTimer();
   const [workInput, setWorkInput] = useState(workDuration);
   const [breakInput, setBreakInput] = useState(breakDuration);
 
+  useEffect(() => { setWorkInput(workDuration); }, [workDuration]);
+  useEffect(() => { setBreakInput(breakDuration); }, [breakDuration]);
+
   const apply = () => {
-    // convert seconds
     const w = Number(workInput);
     const b = Number(breakInput);
     updateDurations(w, b);
   };
 
   return (
-    <div style={{ fontFamily: 'sans-serif', maxWidth: 420, margin: '2rem auto', textAlign: 'center' }}>
+    <div style={{ fontFamily: 'sans-serif', maxWidth: 480, margin: '2rem auto', textAlign: 'center' }}>
       <h1>Pomodoro</h1>
       <fieldset style={{ border: '1px solid #ccc', padding: '0.75rem', marginBottom: '1rem' }} disabled={isRunning}>
         <legend style={{ fontSize: '0.9rem' }}>Durations (seconds)</legend>
@@ -43,6 +45,18 @@ export default function App() {
         <button onClick={reset}>Reset</button>
       </div>
       <p style={{ marginTop: '1.0rem', fontSize: '0.7rem', color: '#555' }}>Current: Work {formatTime(workDuration)} • Break {formatTime(breakDuration)}</p>
+      <div style={{ marginTop: '1rem', border: '1px solid #ddd', padding: '0.75rem', borderRadius: 4, fontSize: '0.75rem', textAlign: 'left' }}>
+        <strong>Progress</strong>
+        {!progress && <div style={{ marginTop: 4 }}>Loading...</div>}
+        {progress && (
+          <ul style={{ listStyle: 'none', padding: 0, margin: '4px 0 0' }}>
+            <li>Level: {progress.level}</li>
+            <li>XP: {progress.xp}</li>
+            <li>Work Sessions: {progress.work_sessions}</li>
+            <li>Streak: {progress.current_streak} day(s)</li>
+          </ul>
+        )}
+      </div>
     </div>
   );
 }

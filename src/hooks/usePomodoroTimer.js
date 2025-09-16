@@ -8,6 +8,8 @@ const DEFAULT_BREAK = 5; // seconds
 import workEndSound from '/timer-terminer-342934.mp3';
 import breakEndSound from '/ping-82822.mp3';
 
+const API_BASE = 'http://localhost:4000/api';
+
 export function usePomodoroTimer() {
   // durations are user adjustable
   const [workDuration, setWorkDuration] = useState(DEFAULT_WORK);
@@ -15,6 +17,7 @@ export function usePomodoroTimer() {
   const [mode, setMode] = useState('work'); // 'work' | 'break'
   const [secondsLeft, setSecondsLeft] = useState(DEFAULT_WORK);
   const [isRunning, setIsRunning] = useState(false);
+  const [progress, setProgress] = useState(null); // {xp, work_sessions, current_streak, last_session_date, level}
   const intervalRef = useRef(null);
   const workAudioRef = useRef(null);
   const breakAudioRef = useRef(null);
@@ -63,7 +66,21 @@ export function usePomodoroTimer() {
       const justFinished = prev;
       const next = prev === 'work' ? 'break' : 'work';
       setSecondsLeft(next === 'work' ? workDuration : breakDuration);
-      if (justFinished === 'work') playSound('workEnd'); else playSound('breakEnd');
+      if (justFinished === 'work') {
+        playSound('workEnd');
+        // Record completion
+        (async () => {
+          try {
+            const res = await fetch(`${API_BASE}/session-complete`, { method: 'POST' });
+            if (res.ok) {
+              const j = await res.json();
+              if (j?.data) setProgress(j.data);
+            }
+          } catch { /* ignore */ }
+        })();
+      } else {
+        playSound('breakEnd');
+      }
       return next;
     });
   }, [workDuration, breakDuration, playSound]);
@@ -107,10 +124,49 @@ export function usePomodoroTimer() {
 
   useEffect(() => clear, []);
 
+  // After local load, attempt server fetch (non-blocking)
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/settings`);
+        if (!res.ok) return;
+        const json = await res.json();
+        if (json?.data) {
+          const { work_seconds, break_seconds } = json.data;
+            if (typeof work_seconds === 'number' && work_seconds > 0) setWorkDuration(work_seconds);
+            if (typeof break_seconds === 'number' && break_seconds > 0) setBreakDuration(break_seconds);
+            if (mode === 'work') setSecondsLeft(work_seconds);
+        }
+      } catch { /* offline or server not started */ }
+    })();
+  }, []);
+
+  // Fetch progress data
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/progress`);
+        if (res.ok) {
+          const json = await res.json();
+          if (json?.data) setProgress(json.data);
+        }
+      } catch { /* ignore */ }
+    })();
+  }, []);
+
   const updateDurations = useCallback((nextWork, nextBreak) => {
-    // Guard: don't allow zero or negative
     if (nextWork > 0) setWorkDuration(nextWork);
     if (nextBreak > 0) setBreakDuration(nextBreak);
+    // Fire and forget save to server
+    (async () => {
+      try {
+        await fetch(`${API_BASE}/settings`, {
+          method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ work_seconds: nextWork, break_seconds: nextBreak })
+        });
+      } catch { /* ignore network errors */ }
+    })();
   }, []);
 
   return {
@@ -123,6 +179,7 @@ export function usePomodoroTimer() {
     workDuration,
     breakDuration,
     updateDurations,
+    progress,
   };
 }
 
