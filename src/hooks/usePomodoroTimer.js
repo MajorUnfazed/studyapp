@@ -17,7 +17,8 @@ export function usePomodoroTimer() {
   const [mode, setMode] = useState('work'); // 'work' | 'break'
   const [secondsLeft, setSecondsLeft] = useState(DEFAULT_WORK);
   const [isRunning, setIsRunning] = useState(false);
-  const [progress, setProgress] = useState(null); // {xp, work_sessions, current_streak, last_session_date, level}
+  const [progress, setProgress] = useState(null); // {xp,..., achievements?}
+  const [achievements, setAchievements] = useState([]);
   const intervalRef = useRef(null);
   const workAudioRef = useRef(null);
   const breakAudioRef = useRef(null);
@@ -74,7 +75,10 @@ export function usePomodoroTimer() {
             const res = await fetch(`${API_BASE}/session-complete`, { method: 'POST' });
             if (res.ok) {
               const j = await res.json();
-              if (j?.data) setProgress(j.data);
+              if (j?.data) {
+                setProgress(j.data);
+                if (j.data.achievements) setAchievements(j.data.achievements);
+              }
             }
           } catch { /* ignore */ }
         })();
@@ -148,7 +152,10 @@ export function usePomodoroTimer() {
         const res = await fetch(`${API_BASE}/progress`);
         if (res.ok) {
           const json = await res.json();
-          if (json?.data) setProgress(json.data);
+          if (json?.data) {
+            setProgress(json.data);
+            if (json.data.achievements) setAchievements(json.data.achievements);
+          }
         }
       } catch { /* ignore */ }
     })();
@@ -180,6 +187,7 @@ export function usePomodoroTimer() {
     breakDuration,
     updateDurations,
     progress,
+    achievements,
   };
 }
 
