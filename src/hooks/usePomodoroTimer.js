@@ -1,22 +1,44 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 
-// Durations in seconds (temporary short values for testing sounds)
-const WORK_DURATION = 10; // 10 seconds (was 25 * 60)
-const BREAK_DURATION = 5; // 5 seconds (as requested)
-
+// Keys for persistence
+const LS_KEY = 'pomodoro_settings_v1';
+const DEFAULT_WORK = 10; // seconds
+const DEFAULT_BREAK = 5; // seconds
 // Preload audio (placed in project root). Vite will handle asset hashing.
 import workEndSound from '/timer-terminer-342934.mp3';
 import breakEndSound from '/ping-82822.mp3';
 
 export function usePomodoroTimer() {
+  // durations are user adjustable
+  const [workDuration, setWorkDuration] = useState(DEFAULT_WORK);
+  const [breakDuration, setBreakDuration] = useState(DEFAULT_BREAK);
   const [mode, setMode] = useState('work'); // 'work' | 'break'
-  const [secondsLeft, setSecondsLeft] = useState(WORK_DURATION);
+  const [secondsLeft, setSecondsLeft] = useState(DEFAULT_WORK);
   const [isRunning, setIsRunning] = useState(false);
   const intervalRef = useRef(null);
   const workAudioRef = useRef(null);
   const breakAudioRef = useRef(null);
 
-  // Lazy init audio elements once (avoid creating each render)
+  // Load persisted settings
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(LS_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (typeof parsed.work === 'number' && parsed.work > 0) setWorkDuration(parsed.work);
+        if (typeof parsed.break === 'number' && parsed.break > 0) setBreakDuration(parsed.break);
+        // Initialize secondsLeft with (possibly) loaded work duration
+        if (typeof parsed.work === 'number' && parsed.work > 0) setSecondsLeft(parsed.work);
+      }
+    } catch { /* ignore */ }
+  }, []);
+
+  // Persist settings
+  useEffect(() => {
+    try { localStorage.setItem(LS_KEY, JSON.stringify({ work: workDuration, break: breakDuration })); } catch { /* ignore */ }
+  }, [workDuration, breakDuration]);
+
+  // Lazy init audio elements once
   useEffect(() => {
     workAudioRef.current = new Audio(workEndSound);
     breakAudioRef.current = new Audio(breakEndSound);
@@ -25,7 +47,6 @@ export function usePomodoroTimer() {
   const playSound = useCallback((type) => {
     const el = type === 'workEnd' ? workAudioRef.current : breakAudioRef.current;
     if (!el) return;
-    // Attempt to play; browsers may block before user interaction (user will have interacted by starting timer)
     el.currentTime = 0;
     el.play().catch(() => {/* ignore */});
   }, []);
@@ -39,15 +60,13 @@ export function usePomodoroTimer() {
 
   const switchMode = useCallback(() => {
     setMode(prev => {
-      const justFinished = prev; // store what ended
+      const justFinished = prev;
       const next = prev === 'work' ? 'break' : 'work';
-      setSecondsLeft(next === 'work' ? WORK_DURATION : BREAK_DURATION);
-      // Play corresponding end sound
-      if (justFinished === 'work') playSound('workEnd');
-      else playSound('breakEnd');
+      setSecondsLeft(next === 'work' ? workDuration : breakDuration);
+      if (justFinished === 'work') playSound('workEnd'); else playSound('breakEnd');
       return next;
     });
-  }, [playSound]);
+  }, [workDuration, breakDuration, playSound]);
 
   const tick = useCallback(() => {
     setSecondsLeft(prev => {
@@ -64,32 +83,35 @@ export function usePomodoroTimer() {
     setIsRunning(true);
   }, [isRunning]);
 
-  const pause = useCallback(() => {
-    setIsRunning(false);
-  }, []);
+  const pause = useCallback(() => { setIsRunning(false); }, []);
 
   const reset = useCallback(() => {
     setIsRunning(false);
     setMode('work');
-    setSecondsLeft(WORK_DURATION);
-  }, []);
+    setSecondsLeft(workDuration);
+  }, [workDuration]);
 
-  // Manage interval
+  // If user changes durations while NOT running, reflect immediately
+  useEffect(() => {
+    if (!isRunning && mode === 'work') setSecondsLeft(workDuration);
+  }, [workDuration, isRunning, mode]);
+  useEffect(() => {
+    if (!isRunning && mode === 'break') setSecondsLeft(breakDuration);
+  }, [breakDuration, isRunning, mode]);
+
   useEffect(() => {
     clear();
-    if (isRunning) {
-      intervalRef.current = setInterval(tick, 1000);
-    }
+    if (isRunning) intervalRef.current = setInterval(tick, 1000);
     return clear;
   }, [isRunning, tick]);
 
-  // When switching modes, ensure we don't display stale second after switch
-  useEffect(() => {
-    if (!isRunning) return; // already handled by interval
-  }, [mode, isRunning]);
-
-  // Cleanup on unmount
   useEffect(() => clear, []);
+
+  const updateDurations = useCallback((nextWork, nextBreak) => {
+    // Guard: don't allow zero or negative
+    if (nextWork > 0) setWorkDuration(nextWork);
+    if (nextBreak > 0) setBreakDuration(nextBreak);
+  }, []);
 
   return {
     mode,
@@ -98,8 +120,9 @@ export function usePomodoroTimer() {
     start,
     pause,
     reset,
-    workDuration: WORK_DURATION,
-    breakDuration: BREAK_DURATION,
+    workDuration,
+    breakDuration,
+    updateDurations,
   };
 }
 
