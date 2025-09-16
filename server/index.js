@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { getSettings, updateSettings, getProgress, recordWorkSession, calculateLevel, getAchievements } from './db.js';
+import { getSettings, updateSettings, getProgress, recordWorkSession, calculateLevel, getAchievements, getHistorySummary } from './db.js';
 
 const app = express();
 app.use(cors());
@@ -41,11 +41,12 @@ app.get('/api/progress', (_req, res) => {
 });
 
 app.post('/api/session-complete', (req, res) => {
-  // For now assume only work sessions count for XP
   try {
-    const p = recordWorkSession();
+    const { started_at, ended_at, duration_seconds } = req.body || {};
+    const p = recordWorkSession({ started_at, ended_at, duration_seconds });
     const achievements = getAchievements();
-    res.json({ success: true, data: { ...p, level: calculateLevel(p.xp), achievements } });
+    const history = getHistorySummary();
+    res.json({ success: true, data: { ...p, level: calculateLevel(p.xp), achievements, history } });
   } catch {
     res.status(500).json({ success: false, error: 'Failed to record session' });
   }
@@ -57,6 +58,15 @@ app.get('/api/achievements', (_req, res) => {
     res.json({ success: true, data: achievements });
   } catch {
     res.status(500).json({ success: false, error: 'Failed to load achievements' });
+  }
+});
+
+app.get('/api/history/summary', (_req, res) => {
+  try {
+    const history = getHistorySummary();
+    res.json({ success: true, data: history });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to load history summary' });
   }
 });
 

@@ -22,6 +22,8 @@ export function usePomodoroTimer() {
   const intervalRef = useRef(null);
   const workAudioRef = useRef(null);
   const breakAudioRef = useRef(null);
+  const sessionStartRef = useRef(null);
+  const [historySummary, setHistorySummary] = useState(null);
 
   // Load persisted settings
   useEffect(() => {
@@ -69,15 +71,23 @@ export function usePomodoroTimer() {
       setSecondsLeft(next === 'work' ? workDuration : breakDuration);
       if (justFinished === 'work') {
         playSound('workEnd');
-        // Record completion
+        const end = new Date();
+        const startDate = sessionStartRef.current || end;
+        const duration = Math.round((end - startDate) / 1000);
+        sessionStartRef.current = null;
         (async () => {
           try {
-            const res = await fetch(`${API_BASE}/session-complete`, { method: 'POST' });
+            const res = await fetch(`${API_BASE}/session-complete`, { 
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ started_at: startDate.toISOString(), ended_at: end.toISOString(), duration_seconds: duration })
+            });
             if (res.ok) {
               const j = await res.json();
               if (j?.data) {
                 setProgress(j.data);
                 if (j.data.achievements) setAchievements(j.data.achievements);
+                if (j.data.history) setHistorySummary(j.data.history);
               }
             }
           } catch { /* ignore */ }
@@ -101,6 +111,7 @@ export function usePomodoroTimer() {
 
   const start = useCallback(() => {
     if (isRunning) return;
+    sessionStartRef.current = new Date();
     setIsRunning(true);
   }, [isRunning]);
 
@@ -161,6 +172,19 @@ export function usePomodoroTimer() {
     })();
   }, []);
 
+  // Initial history fetch
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/history/summary`);
+        if (res.ok) {
+          const j = await res.json();
+          if (j?.data) setHistorySummary(j.data);
+        }
+      } catch { /* ignore */ }
+    })();
+  }, []);
+
   const updateDurations = useCallback((nextWork, nextBreak) => {
     if (nextWork > 0) setWorkDuration(nextWork);
     if (nextBreak > 0) setBreakDuration(nextBreak);
@@ -188,6 +212,7 @@ export function usePomodoroTimer() {
     updateDurations,
     progress,
     achievements,
+    historySummary,
   };
 }
 

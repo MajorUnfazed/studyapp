@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { usePomodoroTimer, formatTime } from './hooks/usePomodoroTimer.js';
 
 export default function App() {
-  const { mode, secondsLeft, isRunning, start, pause, reset, workDuration, breakDuration, updateDurations, progress, achievements } = usePomodoroTimer();
+  const { mode, secondsLeft, isRunning, start, pause, reset, workDuration, breakDuration, updateDurations, progress, achievements, historySummary } = usePomodoroTimer();
   const [workInput, setWorkInput] = useState(workDuration);
   const [breakInput, setBreakInput] = useState(breakDuration);
 
@@ -72,6 +72,33 @@ export default function App() {
                   <span style={{ fontSize: '0.65rem', padding: '2px 6px', borderRadius: 12, background: a.earned ? '#4caf50' : '#999', color: '#fff' }}>{a.earned ? 'Earned' : 'Locked'}</span>
                 </li>
               ))}
+            </ul>
+          )}
+        </div>
+        <div style={{ border: '1px solid #ddd', padding: '0.75rem', borderRadius: 4, fontSize: '0.75rem', textAlign: 'left' }}>
+          <strong>Today & 7 Days</strong>
+          {!historySummary && <div style={{ marginTop: 4 }}>Loading...</div>}
+          {historySummary && (
+            <div style={{ marginTop: 4 }}>
+              <div>Today Focus: {formatTime(historySummary.today_seconds)}</div>
+              <div style={{ marginTop: 6, fontSize: '0.65rem' }}>Last 7 Days (day: mm:ss)</div>
+              <ul style={{ listStyle: 'none', padding: 0, margin: '4px 0 0', fontSize: '0.65rem' }}>
+                {historySummary.last7_days.map(d => (
+                  <li key={d.day}>{d.day.slice(5)}: {formatTime(d.total)}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+        </div>
+        <div style={{ border: '1px solid #ddd', padding: '0.75rem', borderRadius: 4, fontSize: '0.75rem', textAlign: 'left' }}>
+          <strong>Recent Sessions</strong>
+          {!historySummary && <div style={{ marginTop: 4 }}>Loading...</div>}
+          {historySummary && (
+            <ul style={{ listStyle: 'none', padding: 0, margin: '4px 0 0', fontSize: '0.65rem', maxHeight: 160, overflowY: 'auto' }}>
+              {historySummary.recent_sessions.map((s, i) => (
+                <li key={i}>{s.started_at.slice(5,16)} → {formatTime(s.duration_seconds)}</li>
+              ))}
+              {!historySummary.recent_sessions.length && <li>No sessions yet</li>}
             </ul>
           )}
         </div>

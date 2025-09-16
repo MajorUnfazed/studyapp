@@ -37,6 +37,15 @@ db.exec(`CREATE TABLE IF NOT EXISTS achievements (
   earned_at TEXT
 );`);
 
+// Session log (stores individual work sessions)
+db.exec(`CREATE TABLE IF NOT EXISTS session_log (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  started_at TEXT NOT NULL,
+  ended_at TEXT NOT NULL,
+  duration_seconds INTEGER NOT NULL,
+  created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);`);
+
 // Seed achievements if not exist
 const baseAchievements = [
   { code: 'first_session', name: 'First Focus', description: 'Complete your first work session' },
@@ -76,7 +85,14 @@ export function getProgress() {
   return db.prepare('SELECT xp, work_sessions, current_streak, last_session_date FROM progress WHERE id = 1').get();
 }
 
-export function recordWorkSession() {
+export function recordWorkSession(meta = {}) {
+  const { started_at, ended_at, duration_seconds } = meta;
+  if (started_at && ended_at && typeof duration_seconds === 'number') {
+    try {
+      db.prepare('INSERT INTO session_log (started_at, ended_at, duration_seconds) VALUES (?, ?, ?)')
+        .run(started_at, ended_at, duration_seconds);
+    } catch { /* ignore insert issues */ }
+  }
   const today = new Date().toISOString().slice(0,10); // YYYY-MM-DD
   const p = getProgress();
   let newStreak = p.current_streak;
@@ -115,4 +131,13 @@ function evaluateAchievements(progress) {
     const trx = db.transaction(codes => { codes.forEach(c => stmt.run(c)); });
     trx(toEarn);
   }
+}
+
+export function getHistorySummary() {
+  const today = new Date().toISOString().slice(0,10);
+  const sevenDaysAgo = new Date(Date.now() - 6*86400000).toISOString().slice(0,10);
+  const todayTotal = db.prepare("SELECT IFNULL(SUM(duration_seconds),0) as total FROM session_log WHERE substr(started_at,1,10)=?").get(today).total;
+  const last7 = db.prepare("SELECT substr(started_at,1,10) as day, SUM(duration_seconds) as total FROM session_log WHERE substr(started_at,1,10) BETWEEN ? AND ? GROUP BY day ORDER BY day ASC").all(sevenDaysAgo, today);
+  const recent = db.prepare("SELECT started_at, ended_at, duration_seconds FROM session_log ORDER BY id DESC LIMIT 10").all();
+  return { today_seconds: todayTotal, last7_days: last7, recent_sessions: recent };
 }
