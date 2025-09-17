@@ -4,9 +4,9 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 const LS_KEY = 'pomodoro_settings_v1';
 const LS_FLAGS_KEY = 'pomodoro_flags_v1';
 const LS_GOAL_KEY = 'pomodoro_goal_v1';
-const DEFAULT_WORK = 10; // seconds
-const DEFAULT_BREAK = 5; // seconds
-const DEFAULT_LONG_BREAK = 15; // seconds (short for demo)
+const DEFAULT_WORK = 25 * 60; // seconds
+const DEFAULT_BREAK = 5 * 60; // seconds
+const DEFAULT_LONG_BREAK = 15 * 60; // seconds
 const DEFAULT_CYCLES = 4; // work sessions before a long break
 // Preload audio (placed in project root). Vite will handle asset hashing.
 import workEndSound from '/timer-terminer-342934.mp3';
@@ -24,6 +24,7 @@ export function usePomodoroTimer() {
   const [secondsLeft, setSecondsLeft] = useState(DEFAULT_WORK);
   const [isRunning, setIsRunning] = useState(false);
   const [autoStartNext, setAutoStartNext] = useState(true);
+  const [distractionFree, setDistractionFree] = useState(false);
   const [progress, setProgress] = useState(null); // {xp,..., achievements?}
   const [achievements, setAchievements] = useState([]);
   const [heatmap, setHeatmap] = useState(null);
@@ -34,6 +35,7 @@ export function usePomodoroTimer() {
   const workAudioRef = useRef(null);
   const breakAudioRef = useRef(null);
   const sessionStartRef = useRef(null);
+  const endTimeRef = useRef(null);
   const [historySummary, setHistorySummary] = useState(null);
   const modeRef = useRef('work');
   useEffect(() => { modeRef.current = mode; }, [mode]);
@@ -56,6 +58,7 @@ export function usePomodoroTimer() {
         const flags = JSON.parse(flagsRaw);
         if (typeof flags.autoStartNext === 'boolean') setAutoStartNext(flags.autoStartNext);
         if (typeof flags.notificationsEnabled === 'boolean') setNotificationsEnabled(flags.notificationsEnabled);
+        if (typeof flags.distractionFree === 'boolean') setDistractionFree(flags.distractionFree);
       }
       const goalRaw = localStorage.getItem(LS_GOAL_KEY);
       if (goalRaw) {
@@ -72,8 +75,8 @@ export function usePomodoroTimer() {
 
   // Persist flags
   useEffect(() => {
-    try { localStorage.setItem(LS_FLAGS_KEY, JSON.stringify({ autoStartNext, notificationsEnabled })); } catch { /* ignore */ }
-  }, [autoStartNext, notificationsEnabled]);
+    try { localStorage.setItem(LS_FLAGS_KEY, JSON.stringify({ autoStartNext, notificationsEnabled, distractionFree })); } catch { /* ignore */ }
+  }, [autoStartNext, notificationsEnabled, distractionFree]);
 
   // Persist goal
   useEffect(() => {
@@ -110,6 +113,11 @@ export function usePomodoroTimer() {
     }
   };
 
+  const scheduleEnd = useCallback((seconds) => {
+    endTimeRef.current = Date.now() + seconds * 1000;
+    setSecondsLeft(Math.max(0, Math.round((endTimeRef.current - Date.now()) / 1000)));
+  }, []);
+
   const switchMode = useCallback((opts = {}) => {
     const { manual = false, continueRunning: continueOverride } = opts; // manual switch shouldn't award XP or play sounds
     setMode(prev => {
@@ -125,7 +133,7 @@ export function usePomodoroTimer() {
         next = 'work';
       }
       const nextSeconds = next === 'work' ? workDuration : (next === 'break' ? breakDuration : longBreakDuration);
-      setSecondsLeft(nextSeconds);
+      scheduleEnd(nextSeconds);
       if (!manual) {
         if (justFinished === 'work') {
           playSound('workEnd');
@@ -174,16 +182,16 @@ export function usePomodoroTimer() {
       }
       return next;
     });
-  }, [workDuration, breakDuration, longBreakDuration, cyclesBeforeLongBreak, cycleCount, playSound, maybeNotify, autoStartNext]);
+  }, [workDuration, breakDuration, longBreakDuration, cyclesBeforeLongBreak, cycleCount, scheduleEnd, playSound, maybeNotify, autoStartNext]);
 
   const tick = useCallback(() => {
-    setSecondsLeft(prev => {
-      if (prev <= 1) {
-        switchMode();
-        return prev;
-      }
-      return prev - 1;
-    });
+    if (!endTimeRef.current) return;
+    const remaining = Math.max(0, Math.round((endTimeRef.current - Date.now()) / 1000));
+    setSecondsLeft(remaining);
+    if (remaining <= 0) {
+      endTimeRef.current = null;
+      switchMode();
+    }
   }, [switchMode]);
 
   const start = useCallback(() => {
@@ -191,40 +199,38 @@ export function usePomodoroTimer() {
     if (modeRef.current === 'work') {
       sessionStartRef.current = new Date();
     }
+    // if endTimeRef is missing (e.g., after reset), schedule using current mode
+    if (!endTimeRef.current) {
+      const secs = modeRef.current === 'work' ? workDuration : (modeRef.current === 'break' ? breakDuration : longBreakDuration);
+      scheduleEnd(secs);
+    }
     setIsRunning(true);
-  }, [isRunning]);
+  }, [isRunning, workDuration, breakDuration, longBreakDuration, scheduleEnd]);
 
   const pause = useCallback(() => { setIsRunning(false); }, []);
 
   const reset = useCallback(() => {
     setIsRunning(false);
     setMode('work');
-    setSecondsLeft(workDuration);
+    scheduleEnd(workDuration);
     sessionStartRef.current = null;
     setCycleCount(0);
-  }, [workDuration]);
-
-  // Manual skip: switch interval without XP/sounds; optionally keep running if auto-start is on
-  const skip = useCallback(() => {
-    const wasRunning = isRunning;
-    setIsRunning(false);
-    switchMode({ manual: true, continueRunning: autoStartNext && wasRunning });
-  }, [isRunning, autoStartNext, switchMode]);
+  }, [workDuration, scheduleEnd]);
 
   // If user changes durations while NOT running, reflect immediately
   useEffect(() => {
-    if (!isRunning && mode === 'work') setSecondsLeft(workDuration);
-  }, [workDuration, isRunning, mode]);
+    if (!isRunning && mode === 'work') scheduleEnd(workDuration);
+  }, [workDuration, isRunning, mode, scheduleEnd]);
   useEffect(() => {
-    if (!isRunning && mode === 'break') setSecondsLeft(breakDuration);
-  }, [breakDuration, isRunning, mode]);
+    if (!isRunning && mode === 'break') scheduleEnd(breakDuration);
+  }, [breakDuration, isRunning, mode, scheduleEnd]);
   useEffect(() => {
-    if (!isRunning && mode === 'longBreak') setSecondsLeft(longBreakDuration);
-  }, [longBreakDuration, isRunning, mode]);
+    if (!isRunning && mode === 'longBreak') scheduleEnd(longBreakDuration);
+  }, [longBreakDuration, isRunning, mode, scheduleEnd]);
 
   useEffect(() => {
     clear();
-    if (isRunning) intervalRef.current = setInterval(tick, 1000);
+    if (isRunning) intervalRef.current = setInterval(tick, 500);
     return clear;
   }, [isRunning, tick]);
 
@@ -241,11 +247,11 @@ export function usePomodoroTimer() {
           const { work_seconds, break_seconds } = json.data;
             if (typeof work_seconds === 'number' && work_seconds > 0) setWorkDuration(work_seconds);
             if (typeof break_seconds === 'number' && break_seconds > 0) setBreakDuration(break_seconds);
-            if (mode === 'work') setSecondsLeft(work_seconds);
+            if (mode === 'work') scheduleEnd(work_seconds);
         }
       } catch { /* offline or server not started */ }
     })();
-  }, []);
+  }, [scheduleEnd]);
 
   // Fetch progress data
   useEffect(() => {
@@ -300,6 +306,13 @@ export function usePomodoroTimer() {
     })();
   }, []);
 
+  // Manual skip
+  const skip = useCallback(() => {
+    const wasRunning = isRunning;
+    setIsRunning(false);
+    switchMode({ manual: true, continueRunning: autoStartNext && wasRunning });
+  }, [isRunning, autoStartNext, switchMode]);
+
   return {
     mode,
     secondsLeft,
@@ -324,6 +337,8 @@ export function usePomodoroTimer() {
     dailyGoalMinutes,
     setDailyGoalMinutes,
     cycleCount,
+    distractionFree,
+    setDistractionFree,
   };
 }
 

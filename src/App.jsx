@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { usePomodoroTimer, formatTime } from './hooks/usePomodoroTimer.js';
 
 export default function App() {
@@ -9,6 +9,7 @@ export default function App() {
     notificationsEnabled, setNotificationsEnabled,
     dailyGoalMinutes, setDailyGoalMinutes,
     cycleCount,
+    distractionFree, setDistractionFree,
   } = usePomodoroTimer();
 
   const [workInput, setWorkInput] = useState(workDuration);
@@ -17,16 +18,67 @@ export default function App() {
   const [cyclesInput, setCyclesInput] = useState(cyclesBeforeLongBreak);
   const [goalInput, setGoalInput] = useState(dailyGoalMinutes);
   const [permission, setPermission] = useState((typeof window !== 'undefined' && 'Notification' in window) ? Notification.permission : 'default');
+  const [online, setOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  const [backendOnline, setBackendOnline] = useState(true);
+  const [toasts, setToasts] = useState([]);
+  const toastIdRef = useRef(0);
 
   useEffect(() => { setWorkInput(workDuration); }, [workDuration]);
   useEffect(() => { setBreakInput(breakDuration); }, [breakDuration]);
   useEffect(() => { setLongBreakInput(longBreakDuration); }, [longBreakDuration]);
   useEffect(() => { setCyclesInput(cyclesBeforeLongBreak); }, [cyclesBeforeLongBreak]);
   useEffect(() => { setGoalInput(dailyGoalMinutes); }, [dailyGoalMinutes]);
+  useEffect(() => { if (typeof window !== 'undefined' && 'Notification' in window) setPermission(Notification.permission); }, []);
+
+  // Title & favicon updates
   useEffect(() => {
-    if (typeof window !== 'undefined' && 'Notification' in window) {
-      setPermission(Notification.permission);
-    }
+    if (typeof document === 'undefined') return;
+    const origTitle = document.title;
+    const favicon = document.querySelector("link[rel='icon']");
+    const update = () => {
+      document.title = isRunning ? `${formatTime(secondsLeft)} • Pomodoro` : 'Pomodoro';
+      if (favicon) {
+        const canvas = document.createElement('canvas');
+        canvas.width = 64; canvas.height = 64;
+        const ctx = canvas.getContext('2d');
+        ctx.fillStyle = '#fff'; ctx.fillRect(0,0,64,64);
+        ctx.fillStyle = isRunning ? '#4caf50' : '#999';
+        ctx.beginPath(); ctx.arc(32,32,28,0,Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.font = 'bold 28px sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+        ctx.fillText(String(Math.max(0, Math.floor(secondsLeft/60))), 32, 34);
+        favicon.href = canvas.toDataURL('image/png');
+      }
+    };
+    update();
+    return () => { document.title = origTitle; };
+  }, [isRunning, secondsLeft]);
+
+  // Online/offline banner
+  useEffect(() => {
+    const on = () => setOnline(true);
+    const off = () => setOnline(false);
+    window.addEventListener('online', on); window.addEventListener('offline', off);
+    return () => { window.removeEventListener('online', on); window.removeEventListener('offline', off); };
+  }, []);
+
+  // Backend health polling
+  useEffect(() => {
+    let cancelled = false;
+    const check = async () => {
+      try {
+        const ctrl = new AbortController();
+        const timer = setTimeout(() => ctrl.abort(), 1500);
+        const res = await fetch('http://localhost:4000/api/health', { signal: ctrl.signal });
+        clearTimeout(timer);
+        if (!cancelled) setBackendOnline(!!res.ok);
+      } catch {
+        if (!cancelled) setBackendOnline(false);
+      }
+    };
+    check();
+    const id = setInterval(check, 15000);
+    return () => { cancelled = true; clearInterval(id); };
   }, []);
 
   // Keyboard shortcuts
@@ -37,10 +89,11 @@ export default function App() {
       else if (e.key.toLowerCase() === 's') { e.preventDefault(); skip(); }
       else if (e.key.toLowerCase() === 'r') { e.preventDefault(); reset(); }
       else if (e.key.toLowerCase() === 'a') { e.preventDefault(); setAutoStartNext(!autoStartNext); }
+      else if (e.key.toLowerCase() === 'd') { e.preventDefault(); setDistractionFree(!distractionFree); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [isRunning, start, pause, reset, skip, autoStartNext, setAutoStartNext]);
+  }, [isRunning, start, pause, reset, skip, autoStartNext, setAutoStartNext, distractionFree, setDistractionFree]);
 
   const apply = () => {
     const w = Number(workInput);
@@ -48,6 +101,7 @@ export default function App() {
     const lb = Number(longBreakInput);
     const c = Number(cyclesInput);
     updateDurations(w, b, lb, c);
+    pushToast('Settings saved');
   };
 
   const requestNotifications = async () => {
@@ -63,9 +117,47 @@ export default function App() {
   const goalSec = Math.max(0, Number(goalInput) * 60);
   const goalPct = goalSec > 0 ? Math.min(100, Math.round((todaySec / goalSec) * 100)) : 0;
 
+  const pushToast = (msg, type = 'info', ttl = 2500) => {
+    const id = ++toastIdRef.current;
+    setToasts(t => [...t, { id, msg, type }]);
+    setTimeout(() => setToasts(t => t.filter(x => x.id !== id)), ttl);
+  };
+
+  const presets = [
+    { label: '25/5', w: 25*60, b: 5*60, lb: 15*60, c: 4 },
+    { label: '50/10', w: 50*60, b: 10*60, lb: 20*60, c: 4 },
+    { label: '90/15', w: 90*60, b: 15*60, lb: 30*60, c: 3 },
+  ];
+
+  const usePreset = (p) => {
+    updateDurations(p.w, p.b, p.lb, p.c);
+    pushToast(`Preset applied: ${p.label}`);
+  };
+
   return (
-    <div style={{ fontFamily: 'sans-serif', maxWidth: 760, margin: '2rem auto', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+    <div style={{ fontFamily: 'sans-serif', maxWidth: 820, margin: '2rem auto', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+      {(!online || !backendOnline) && (
+        <div style={{ background: '#ffecb3', color: '#7a5d00', padding: '6px 10px', border: '1px solid #ffd54f', borderRadius: 4 }}>
+          {!online ? (
+            <>You are offline. Changes will be saved locally and synced when back online.</>
+          ) : (
+            <>Backend is unreachable (http://localhost:4000). Stats, history, and achievements won’t sync until it’s back. The timer still works.</>
+          )}
+        </div>
+      )}
+
       <h1>Pomodoro</h1>
+
+      {/* Presets */}
+      <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
+        {presets.map(p => (
+          <button key={p.label} onClick={() => usePreset(p)}>{p.label}</button>
+        ))}
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 8, fontSize: '0.85rem' }}>
+          <input type="checkbox" checked={distractionFree} onChange={e => setDistractionFree(e.target.checked)} />
+          Distraction-free
+        </label>
+      </div>
 
       <fieldset style={{ border: '1px solid #ccc', padding: '0.75rem', margin: 0 }} disabled={isRunning}>
         <legend style={{ fontSize: '0.9rem' }}>Durations & Cycles</legend>
@@ -110,107 +202,147 @@ export default function App() {
         <p style={{ marginTop: '1.0rem', fontSize: '0.7rem', color: '#555' }}>Current: Work {formatTime(workDuration)} • Break {formatTime(breakDuration)} • Long {formatTime(longBreakDuration)} • Every {cyclesBeforeLongBreak} cycles</p>
       </div>
 
-      <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))' }}>
-        <div style={{ border: '1px solid #ddd', padding: '0.75rem', borderRadius: 4, fontSize: '0.75rem', textAlign: 'left' }}>
-          <strong>Daily Goal</strong>
-          <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <div title={`${goalPct}%`} style={{ flex: 1, height: 10, background: '#eee', borderRadius: 10, overflow: 'hidden' }}>
-              <div style={{ width: `${goalPct}%`, height: '100%', background: goalPct >= 100 ? '#4caf50' : '#81c784' }} />
-            </div>
-            <div style={{ fontSize: '0.75rem', minWidth: 72, textAlign: 'right' }}>{formatTime(todaySec)} / {Math.max(0, Number(goalInput))}m</div>
+      {!distractionFree && (
+        <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))' }}>
+          {/* Daily Goal */}
+          <DailyGoalCard todaySec={todaySec} goalInput={goalInput} setGoalInput={setGoalInput} setDailyGoalMinutes={setDailyGoalMinutes} goalPct={goalPct} />
+
+          {/* Notifications */}
+          <NotificationsCard notificationsEnabled={notificationsEnabled} setNotificationsEnabled={setNotificationsEnabled} permission={permission} requestNotifications={requestNotifications} />
+
+          {/* Progress */}
+          <ProgressCard progress={progress} />
+
+          {/* Achievements */}
+          <AchievementsCard achievements={achievements} />
+
+          {/* Today & 7 Days */}
+          <HistoryCard historySummary={historySummary} />
+
+          {/* Heatmap */}
+          <HeatmapCard heatmap={heatmap} />
+        </div>
+      )}
+
+      {/* Toasts */}
+      <div style={{ position: 'fixed', right: 16, bottom: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {toasts.map(t => (
+          <div key={t.id} style={{ background: '#333', color: '#fff', padding: '8px 12px', borderRadius: 6, boxShadow: '0 2px 8px rgba(0,0,0,0.2)', fontSize: '0.85rem' }}>
+            {t.msg}
           </div>
-          <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
-            <label style={{ fontSize: '0.75rem' }}>Goal (min)</label>
-            <input type="number" min={0} value={goalInput} onChange={e => setGoalInput(e.target.value)} style={{ width: 90, textAlign: 'center' }} />
-            <button type="button" onClick={() => setDailyGoalMinutes(Number(goalInput) || 0)}>Save</button>
-          </div>
-        </div>
-
-        <div style={{ border: '1px solid #ddd', padding: '0.75rem', borderRadius: 4, fontSize: '0.75rem', textAlign: 'left' }}>
-          <strong>Notifications</strong>
-          <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-            <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
-              <input type="checkbox" checked={notificationsEnabled} onChange={e => setNotificationsEnabled(e.target.checked)} />
-              Enable desktop notifications
-            </label>
-            <span style={{ fontSize: '0.7rem', color: '#666' }}>Status: {('Notification' in window) ? permission : 'unsupported'}</span>
-            {('Notification' in window) && permission !== 'granted' && (
-              <button type="button" onClick={requestNotifications}>Allow</button>
-            )}
-          </div>
-          <div style={{ marginTop: 6, fontSize: '0.7rem', color: '#666' }}>
-            {permission === 'denied' ? 'Notifications are blocked in your browser settings for this site.' : 'Shows alerts when a work/break ends.'}
-          </div>
-        </div>
-
-        <div style={{ border: '1px solid #ddd', padding: '0.75rem', borderRadius: 4, fontSize: '0.75rem', textAlign: 'left' }}>
-          <strong>Progress</strong>
-          {!progress && <div style={{ marginTop: 4 }}>Loading...</div>}
-          {progress && (
-            <ul style={{ listStyle: 'none', padding: 0, margin: '4px 0 0' }}>
-              <li>Level: {progress.level}</li>
-              <li>XP: {progress.xp}</li>
-              <li>Work Sessions: {progress.work_sessions}</li>
-              <li>Streak: {progress.current_streak} day(s)</li>
-            </ul>
-          )}
-        </div>
-
-        <div style={{ border: '1px solid #ddd', padding: '0.75rem', borderRadius: 4, fontSize: '0.75rem', textAlign: 'left' }}>
-          <strong>Achievements</strong>
-          {!achievements.length && <div style={{ marginTop: 4 }}>Loading...</div>}
-          {!!achievements.length && (
-            <ul style={{ listStyle: 'none', padding: 0, margin: '4px 0 0', display: 'flex', flexDirection: 'column', gap: 4 }}>
-              {achievements.map(a => (
-                <li key={a.code} style={{ opacity: a.earned ? 1 : 0.4, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
-                  <span>
-                    <span style={{ fontWeight: 600 }}>{a.name}</span><br />
-                    <span style={{ fontSize: '0.65rem' }}>{a.description}</span>
-                  </span>
-                  <span style={{ fontSize: '0.65rem', padding: '2px 6px', borderRadius: 12, background: a.earned ? '#4caf50' : '#999', color: '#fff' }}>{a.earned ? 'Earned' : 'Locked'}</span>
-                </li>
-              ))}
-            </ul>
-          )}
-        </div>
-
-        <div style={{ border: '1px solid #ddd', padding: '0.75rem', borderRadius: 4, fontSize: '0.75rem', textAlign: 'left' }}>
-          <strong>Today & 7 Days</strong>
-          {!historySummary && <div style={{ marginTop: 4 }}>Loading...</div>}
-          {historySummary && (
-            <div style={{ marginTop: 4 }}>
-              <div>Today Focus: {formatTime(historySummary.today_seconds)}</div>
-              <div style={{ marginTop: 6, fontSize: '0.65rem' }}>Last 7 Days (day: mm:ss)</div>
-              <ul style={{ listStyle: 'none', padding: 0, margin: '4px 0 0', fontSize: '0.65rem' }}>
-                {historySummary.last7_days.map(d => (
-                  <li key={d.day}>{d.day.slice(5)}: {formatTime(d.total)}</li>
-                ))}
-              </ul>
-            </div>
-          )}
-        </div>
-
-        <div style={{ border: '1px solid #ddd', padding: '0.75rem', borderRadius: 4, fontSize: '0.75rem', textAlign: 'left' }}>
-          <strong>Recent Sessions</strong>
-          {!historySummary && <div style={{ marginTop: 4 }}>Loading...</div>}
-          {historySummary && (
-            <ul style={{ listStyle: 'none', padding: 0, margin: '4px 0 0', fontSize: '0.65rem', maxHeight: 160, overflowY: 'auto' }}>
-              {historySummary.recent_sessions.map((s, i) => (
-                <li key={i}>{s.started_at.slice(5,16)} → {formatTime(s.duration_seconds)}</li>
-              ))}
-              {!historySummary.recent_sessions.length && <li>No sessions yet</li>}
-            </ul>
-          )}
-        </div>
-
-        <div style={{ border: '1px solid #ddd', padding: '0.75rem', borderRadius: 4, fontSize: '0.75rem', textAlign: 'left' }}>
-          <strong>Heatmap (last 120 days)</strong>
-          {!heatmap && <div style={{ marginTop: 4 }}>Loading...</div>}
-          {heatmap && (
-            <HeatmapGrid data={heatmap} />
-          )}
-        </div>
+        ))}
       </div>
+    </div>
+  );
+}
+
+function DailyGoalCard({ todaySec, goalInput, setGoalInput, setDailyGoalMinutes, goalPct }) {
+  return (
+    <div style={{ border: '1px solid #ddd', padding: '0.75rem', borderRadius: 4, fontSize: '0.75rem', textAlign: 'left' }}>
+      <strong>Daily Goal</strong>
+      <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div title={`${goalPct}%`} style={{ flex: 1, height: 10, background: '#eee', borderRadius: 10, overflow: 'hidden' }}>
+          <div style={{ width: `${goalPct}%`, height: '100%', background: goalPct >= 100 ? '#4caf50' : '#81c784' }} />
+        </div>
+        <div style={{ fontSize: '0.75rem', minWidth: 72, textAlign: 'right' }}>{formatTime(todaySec)} / {Math.max(0, Number(goalInput))}m</div>
+      </div>
+      <div style={{ marginTop: 8, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <label style={{ fontSize: '0.75rem' }}>Goal (min)</label>
+        <input type="number" min={0} value={goalInput} onChange={e => setGoalInput(e.target.value)} style={{ width: 90, textAlign: 'center' }} />
+        <button type="button" onClick={() => setDailyGoalMinutes(Number(goalInput) || 0)}>Save</button>
+      </div>
+    </div>
+  );
+}
+
+function NotificationsCard({ notificationsEnabled, setNotificationsEnabled, permission, requestNotifications }) {
+  return (
+    <div style={{ border: '1px solid #ddd', padding: '0.75rem', borderRadius: 4, fontSize: '0.75rem', textAlign: 'left' }}>
+      <strong>Notifications</strong>
+      <div style={{ marginTop: 6, display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
+        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+          <input type="checkbox" checked={notificationsEnabled} onChange={e => setNotificationsEnabled(e.target.checked)} />
+          Enable desktop notifications
+        </label>
+        <span style={{ fontSize: '0.7rem', color: '#666' }}>Status: {('Notification' in window) ? permission : 'unsupported'}</span>
+        {('Notification' in window) && permission !== 'granted' && (
+          <button type="button" onClick={requestNotifications}>Allow</button>
+        )}
+      </div>
+      <div style={{ marginTop: 6, fontSize: '0.7rem', color: '#666' }}>
+        {permission === 'denied' ? 'Notifications are blocked in your browser settings for this site.' : 'Shows alerts when a work/break ends.'}
+      </div>
+    </div>
+  );
+}
+
+function ProgressCard({ progress }) {
+  return (
+    <div style={{ border: '1px solid #ddd', padding: '0.75rem', borderRadius: 4, fontSize: '0.75rem', textAlign: 'left' }}>
+      <strong>Progress</strong>
+      {!progress && <div style={{ marginTop: 4 }}>Loading...</div>}
+      {progress && (
+        <ul style={{ listStyle: 'none', padding: 0, margin: '4px 0 0' }}>
+          <li>Level: {progress.level}</li>
+          <li>XP: {progress.xp}</li>
+          <li>Work Sessions: {progress.work_sessions}</li>
+          <li>Streak: {progress.current_streak} day(s)</li>
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function AchievementsCard({ achievements }) {
+  return (
+    <div style={{ border: '1px solid #ddd', padding: '0.75rem', borderRadius: 4, fontSize: '0.75rem', textAlign: 'left' }}>
+      <strong>Achievements</strong>
+      {!achievements.length && <div style={{ marginTop: 4 }}>Loading...</div>}
+      {!!achievements.length && (
+        <ul style={{ listStyle: 'none', padding: 0, margin: '4px 0 0', display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {achievements.map(a => (
+            <li key={a.code} style={{ opacity: a.earned ? 1 : 0.4, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+              <span>
+                <span style={{ fontWeight: 600 }}>{a.name}</span><br />
+                <span style={{ fontSize: '0.65rem' }}>{a.description}</span>
+              </span>
+              <span style={{ fontSize: '0.65rem', padding: '2px 6px', borderRadius: 12, background: a.earned ? '#4caf50' : '#999', color: '#fff' }}>{a.earned ? 'Earned' : 'Locked'}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+    </div>
+  );
+}
+
+function HistoryCard({ historySummary }) {
+  return (
+    <div style={{ border: '1px solid #ddd', padding: '0.75rem', borderRadius: 4, fontSize: '0.75rem', textAlign: 'left' }}>
+      <strong>Today & 7 Days</strong>
+      {!historySummary && <div style={{ marginTop: 4 }}>Loading...</div>}
+      {historySummary && (
+        <div style={{ marginTop: 4 }}>
+          <div>Today Focus: {formatTime(historySummary.today_seconds)}</div>
+          <div style={{ marginTop: 6, fontSize: '0.65rem' }}>Last 7 Days (day: mm:ss)</div>
+          <ul style={{ listStyle: 'none', padding: 0, margin: '4px 0 0', fontSize: '0.65rem' }}>
+            {historySummary.last7_days.map(d => (
+              <li key={d.day}>{d.day.slice(5)}: {formatTime(d.total)}</li>
+            ))}
+          </ul>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function HeatmapCard({ heatmap }) {
+  return (
+    <div style={{ border: '1px solid #ddd', padding: '0.75rem', borderRadius: 4, fontSize: '0.75rem', textAlign: 'left' }}>
+      <strong>Heatmap (last 120 days)</strong>
+      {!heatmap && <div style={{ marginTop: 4 }}>Loading...</div>}
+      {heatmap && (
+        <HeatmapGrid data={heatmap} />
+      )}
     </div>
   );
 }
