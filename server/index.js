@@ -1,6 +1,6 @@
 import express from 'express';
 import cors from 'cors';
-import { getSettings, updateSettings, getProgress, recordWorkSession, calculateLevel, getAchievements, getHistorySummary } from './db.js';
+import { getSettings, updateSettings, getProgress, recordWorkSession, calculateLevel, getAchievements, getHistorySummary, getHeatmap } from './db.js';
 
 const app = express();
 app.use(cors());
@@ -67,6 +67,16 @@ app.get('/api/history/summary', (_req, res) => {
     res.json({ success: true, data: history });
   } catch {
     res.status(500).json({ success: false, error: 'Failed to load history summary' });
+  }
+});
+
+app.get('/api/history/heatmap', (req, res) => {
+  try {
+    const days = Math.max(1, Math.min(366, Number(req.query.days) || 120));
+    const data = getHeatmap(days);
+    res.json({ success: true, data });
+  } catch {
+    res.status(500).json({ success: false, error: 'Failed to load heatmap' });
   }
 });
 

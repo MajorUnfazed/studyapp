@@ -141,3 +141,12 @@ export function getHistorySummary() {
   const recent = db.prepare("SELECT started_at, ended_at, duration_seconds FROM session_log ORDER BY id DESC LIMIT 10").all();
   return { today_seconds: todayTotal, last7_days: last7, recent_sessions: recent };
 }
+
+export function getHeatmap(days = 120) {
+  const end = new Date();
+  const start = new Date(Date.now() - (days - 1) * 86400000);
+  const startStr = start.toISOString().slice(0,10);
+  const endStr = end.toISOString().slice(0,10);
+  const rows = db.prepare("SELECT substr(started_at,1,10) as day, SUM(duration_seconds) as total FROM session_log WHERE substr(started_at,1,10) BETWEEN ? AND ? GROUP BY day ORDER BY day ASC").all(startStr, endStr);
+  return { start: startStr, end: endStr, days, data: rows };
+}
