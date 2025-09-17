@@ -68,7 +68,7 @@ export default function App() {
     const check = async () => {
       try {
         const ctrl = new AbortController();
-        const timer = setTimeout(() => ctrl.abort(), 1500);
+        const timer = setTimeout(() => ctrl.abort(), 800);
         const res = await fetch('http://localhost:4000/api/health', { signal: ctrl.signal });
         clearTimeout(timer);
         if (!cancelled) setBackendOnline(!!res.ok);
@@ -77,8 +77,12 @@ export default function App() {
       }
     };
     check();
-    const id = setInterval(check, 15000);
-    return () => { cancelled = true; clearInterval(id); };
+    const id = setInterval(check, 5000);
+    const onFocus = () => check();
+    const onVisible = () => { if (document.visibilityState === 'visible') check(); };
+    window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisible);
+    return () => { cancelled = true; clearInterval(id); window.removeEventListener('focus', onFocus); document.removeEventListener('visibilitychange', onVisible); };
   }, []);
 
   // Keyboard shortcuts
