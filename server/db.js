@@ -46,6 +46,9 @@ db.exec(`CREATE TABLE IF NOT EXISTS session_log (
   created_at TEXT NOT NULL DEFAULT (datetime('now'))
 );`);
 
+// Ensure idempotency for session inserts (prevents duplicates on retry/replay)
+db.exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_session_unique ON session_log(started_at, ended_at);`);
+
 // Seed achievements if not exist
 const baseAchievements = [
   { code: 'first_session', name: 'First Focus', description: 'Complete your first work session' },

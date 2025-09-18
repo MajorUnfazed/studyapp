@@ -1,1 +1,33 @@
-node_modules
+## Dependencies
+node_modules/
+
+## Builds & caches
+dist/
+dev-dist/
+.vite/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+## Environment & local config
+.env
+.env.*
+*.local
+
+## SQLite database & artifacts
+server/*.sqlite
+server/*.sqlite-*
+server/*.sqlite*
+
+## Coverage & test output
+coverage/
+.jest/
+
+## Editor/OS files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/

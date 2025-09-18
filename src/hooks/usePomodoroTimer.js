@@ -32,6 +32,7 @@ export function usePomodoroTimer() {
   const [dailyGoalMinutes, setDailyGoalMinutes] = useState(60);
   const [cycleCount, setCycleCount] = useState(0); // completed short work cycles since last long break
   const intervalRef = useRef(null);
+  const workerRef = useRef(null);
   const workAudioRef = useRef(null);
   const breakAudioRef = useRef(null);
   const sessionStartRef = useRef(null);
@@ -39,6 +40,10 @@ export function usePomodoroTimer() {
   const [historySummary, setHistorySummary] = useState(null);
   const modeRef = useRef('work');
   useEffect(() => { modeRef.current = mode; }, [mode]);
+  // Idle detection state
+  const lastActiveRef = useRef(Date.now());
+  const IDLE_MS = 3 * 60 * 1000; // 3 minutes inactivity
+  const HIDDEN_PAUSE_MS = 5 * 60 * 1000; // if tab hidden >= 5 min, pause
 
   // Load persisted settings
   useEffect(() => {
@@ -116,6 +121,10 @@ export function usePomodoroTimer() {
   const scheduleEnd = useCallback((seconds) => {
     endTimeRef.current = Date.now() + seconds * 1000;
     setSecondsLeft(Math.max(0, Math.round((endTimeRef.current - Date.now()) / 1000)));
+    // If worker is active, resync it with the new end time
+    if (workerRef.current) {
+      try { workerRef.current.postMessage({ type: 'resync', endTime: endTimeRef.current }); } catch { /* ignore */ }
+    }
   }, []);
 
   const switchMode = useCallback((opts = {}) => {
@@ -199,15 +208,40 @@ export function usePomodoroTimer() {
     if (modeRef.current === 'work') {
       sessionStartRef.current = new Date();
     }
+  lastActiveRef.current = Date.now();
     // if endTimeRef is missing (e.g., after reset), schedule using current mode
     if (!endTimeRef.current) {
       const secs = modeRef.current === 'work' ? workDuration : (modeRef.current === 'break' ? breakDuration : longBreakDuration);
       scheduleEnd(secs);
     }
+    // Spin up worker for ticking if supported
+    try {
+      if (!workerRef.current) {
+        workerRef.current = new Worker(new URL('../workers/timerWorker.js', import.meta.url), { type: 'module' });
+        workerRef.current.onmessage = (e) => {
+          const msg = e.data || {};
+          if (msg.type === 'tick') {
+            setSecondsLeft(msg.remaining);
+          } else if (msg.type === 'done') {
+            endTimeRef.current = null;
+            // Boundary reached, trigger mode switch
+            switchMode();
+          }
+        };
+      }
+      workerRef.current.postMessage({ type: 'start', endTime: endTimeRef.current });
+      // Stop main-thread interval when worker is active
+      if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
+    } catch { /* fallback to main-thread interval */ }
     setIsRunning(true);
-  }, [isRunning, workDuration, breakDuration, longBreakDuration, scheduleEnd]);
+  }, [isRunning, workDuration, breakDuration, longBreakDuration, scheduleEnd, switchMode]);
 
-  const pause = useCallback(() => { setIsRunning(false); }, []);
+  const pause = useCallback(() => {
+    setIsRunning(false);
+    if (workerRef.current) {
+      try { workerRef.current.postMessage({ type: 'pause' }); } catch { /* ignore */ }
+    }
+  }, []);
 
   const reset = useCallback(() => {
     setIsRunning(false);
@@ -215,6 +249,9 @@ export function usePomodoroTimer() {
     scheduleEnd(workDuration);
     sessionStartRef.current = null;
     setCycleCount(0);
+    if (workerRef.current) {
+      try { workerRef.current.postMessage({ type: 'stop' }); } catch { /* ignore */ }
+    }
   }, [workDuration, scheduleEnd]);
 
   // If user changes durations while NOT running, reflect immediately
@@ -229,12 +266,44 @@ export function usePomodoroTimer() {
   }, [longBreakDuration, isRunning, mode, scheduleEnd]);
 
   useEffect(() => {
+    // If worker isn't running, use main-thread interval fallback
     clear();
-    if (isRunning) intervalRef.current = setInterval(tick, 500);
+    const usingWorker = !!workerRef.current;
+    if (isRunning && !usingWorker) intervalRef.current = setInterval(tick, 500);
     return clear;
   }, [isRunning, tick]);
 
   useEffect(() => clear, []);
+
+  // Idle detection: auto-pause when inactive or tab hidden for too long (work mode only)
+  useEffect(() => {
+    const markActive = () => { lastActiveRef.current = Date.now(); };
+    const onVisibility = () => { if (document.visibilityState === 'visible') lastActiveRef.current = Date.now(); };
+    window.addEventListener('mousemove', markActive, { passive: true });
+    window.addEventListener('keydown', markActive, { passive: true });
+    document.addEventListener('visibilitychange', onVisibility);
+
+    let t;
+    const check = () => {
+      if (isRunning && modeRef.current === 'work') {
+        const now = Date.now();
+        const idleFor = now - lastActiveRef.current;
+        const hidden = document.visibilityState === 'hidden';
+        if (idleFor >= IDLE_MS || (hidden && idleFor >= HIDDEN_PAUSE_MS)) {
+          if (workerRef.current) { try { workerRef.current.postMessage({ type: 'pause' }); } catch { /* ignore */ } }
+          setIsRunning(false);
+          try {
+            if (notificationsEnabled && 'Notification' in window && Notification.permission === 'granted') {
+              new Notification('Paused due to inactivity', { body: 'Press Start to resume your session.' });
+            }
+          } catch { /* ignore */ }
+        }
+      }
+      t = setTimeout(check, 15000); // check every 15s
+    };
+    t = setTimeout(check, 15000);
+    return () => { if (t) clearTimeout(t); window.removeEventListener('mousemove', markActive); window.removeEventListener('keydown', markActive); document.removeEventListener('visibilitychange', onVisibility); };
+  }, [isRunning, notificationsEnabled]);
 
   // After local load, attempt server fetch (non-blocking)
   useEffect(() => {
@@ -263,9 +332,20 @@ export function usePomodoroTimer() {
           if (json?.data) {
             setProgress(json.data);
             if (json.data.achievements) setAchievements(json.data.achievements);
+            try { localStorage.setItem('cache_progress', JSON.stringify(json.data)); } catch {}
           }
         }
       } catch { /* ignore */ }
+      // Offline fallback
+      if (!progress) {
+        try {
+          const cached = JSON.parse(localStorage.getItem('cache_progress') || 'null');
+          if (cached) {
+            setProgress(cached);
+            if (cached.achievements) setAchievements(cached.achievements);
+          }
+        } catch {}
+      }
     })();
   }, []);
 
@@ -277,6 +357,7 @@ export function usePomodoroTimer() {
         if (res.ok) {
           const j = await res.json();
           if (j?.data) setHistorySummary(j.data);
+          try { localStorage.setItem('cache_history_summary', JSON.stringify(j?.data)); } catch {}
         }
       } catch { /* ignore */ }
       try {
@@ -284,8 +365,16 @@ export function usePomodoroTimer() {
         if (res2.ok) {
           const j2 = await res2.json();
           if (j2?.data) setHeatmap(j2.data);
+          try { localStorage.setItem('cache_heatmap', JSON.stringify(j2?.data)); } catch {}
         }
       } catch { /* ignore */ }
+      // Offline fallbacks
+      if (!historySummary) {
+        try { const c = JSON.parse(localStorage.getItem('cache_history_summary') || 'null'); if (c) setHistorySummary(c); } catch {}
+      }
+      if (!heatmap) {
+        try { const c2 = JSON.parse(localStorage.getItem('cache_heatmap') || 'null'); if (c2) setHeatmap(c2); } catch {}
+      }
     })();
   }, []);
 
