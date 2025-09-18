@@ -120,7 +120,7 @@ export function usePomodoroTimer() {
 
   const scheduleEnd = useCallback((seconds) => {
     endTimeRef.current = Date.now() + seconds * 1000;
-    setSecondsLeft(Math.max(0, Math.round((endTimeRef.current - Date.now()) / 1000)));
+    setSecondsLeft(Math.max(0, Math.ceil((endTimeRef.current - Date.now()) / 1000)));
     // If worker is active, resync it with the new end time
     if (workerRef.current) {
       try { workerRef.current.postMessage({ type: 'resync', endTime: endTimeRef.current }); } catch { /* ignore */ }
@@ -142,7 +142,6 @@ export function usePomodoroTimer() {
         next = 'work';
       }
       const nextSeconds = next === 'work' ? workDuration : (next === 'break' ? breakDuration : longBreakDuration);
-      scheduleEnd(nextSeconds);
       if (!manual) {
         if (justFinished === 'work') {
           playSound('workEnd');
@@ -179,15 +178,18 @@ export function usePomodoroTimer() {
       }
       // Control running state based on autoStartNext (or provided override for manual skip)
       const shouldContinue = manual ? !!continueOverride : !!autoStartNext;
-      if (!shouldContinue) {
-        // pause at boundary
-        setIsRunning(false);
-      } else {
-        // continue running; if entering a work interval, mark session start
+      if (shouldContinue) {
+        // continue running; schedule and mark session start if entering work
+        scheduleEnd(nextSeconds);
         setIsRunning(true);
         if (next === 'work') {
           sessionStartRef.current = new Date();
         }
+      } else {
+        // pause at boundary, do not set endTime; just set displayed seconds
+        endTimeRef.current = null;
+        setSecondsLeft(nextSeconds);
+        setIsRunning(false);
       }
       return next;
     });
@@ -195,7 +197,7 @@ export function usePomodoroTimer() {
 
   const tick = useCallback(() => {
     if (!endTimeRef.current) return;
-    const remaining = Math.max(0, Math.round((endTimeRef.current - Date.now()) / 1000));
+    const remaining = Math.max(0, Math.ceil((endTimeRef.current - Date.now()) / 1000));
     setSecondsLeft(remaining);
     if (remaining <= 0) {
       endTimeRef.current = null;
@@ -211,7 +213,7 @@ export function usePomodoroTimer() {
   lastActiveRef.current = Date.now();
     // if endTimeRef is missing (e.g., after reset), schedule using current mode
     if (!endTimeRef.current) {
-      const secs = modeRef.current === 'work' ? workDuration : (modeRef.current === 'break' ? breakDuration : longBreakDuration);
+      const secs = Math.max(1, Number(secondsLeft) || 0);
       scheduleEnd(secs);
     }
     // Spin up worker for ticking if supported
@@ -234,36 +236,57 @@ export function usePomodoroTimer() {
       if (intervalRef.current) { clearInterval(intervalRef.current); intervalRef.current = null; }
     } catch { /* fallback to main-thread interval */ }
     setIsRunning(true);
-  }, [isRunning, workDuration, breakDuration, longBreakDuration, scheduleEnd, switchMode]);
+  }, [isRunning, secondsLeft, scheduleEnd, switchMode]);
 
   const pause = useCallback(() => {
     setIsRunning(false);
     if (workerRef.current) {
       try { workerRef.current.postMessage({ type: 'pause' }); } catch { /* ignore */ }
     }
+    // Clear endTime so resume uses current secondsLeft
+    endTimeRef.current = null;
   }, []);
 
   const reset = useCallback(() => {
     setIsRunning(false);
     setMode('work');
-    scheduleEnd(workDuration);
+    // Reset display without scheduling end time until start
+    endTimeRef.current = null;
+    setSecondsLeft(workDuration);
     sessionStartRef.current = null;
     setCycleCount(0);
     if (workerRef.current) {
       try { workerRef.current.postMessage({ type: 'stop' }); } catch { /* ignore */ }
     }
-  }, [workDuration, scheduleEnd]);
+  }, [workDuration]);
 
-  // If user changes durations while NOT running, reflect immediately
+  // If user changes durations while NOT running, reflect immediately for the current mode (no endTime scheduling).
+  // Avoid rescheduling on mere pause: only update secondsLeft when the value actually changed.
+  const prevDurRef = useRef({ w: workDuration, b: breakDuration, lb: longBreakDuration });
   useEffect(() => {
-    if (!isRunning && mode === 'work') scheduleEnd(workDuration);
-  }, [workDuration, isRunning, mode, scheduleEnd]);
+    const prev = prevDurRef.current;
+    if (!isRunning && mode === 'work' && workDuration !== prev.w) {
+      endTimeRef.current = null;
+      setSecondsLeft(workDuration);
+    }
+    prevDurRef.current.w = workDuration;
+  }, [workDuration, isRunning, mode]);
   useEffect(() => {
-    if (!isRunning && mode === 'break') scheduleEnd(breakDuration);
-  }, [breakDuration, isRunning, mode, scheduleEnd]);
+    const prev = prevDurRef.current;
+    if (!isRunning && mode === 'break' && breakDuration !== prev.b) {
+      endTimeRef.current = null;
+      setSecondsLeft(breakDuration);
+    }
+    prevDurRef.current.b = breakDuration;
+  }, [breakDuration, isRunning, mode]);
   useEffect(() => {
-    if (!isRunning && mode === 'longBreak') scheduleEnd(longBreakDuration);
-  }, [longBreakDuration, isRunning, mode, scheduleEnd]);
+    const prev = prevDurRef.current;
+    if (!isRunning && mode === 'longBreak' && longBreakDuration !== prev.lb) {
+      endTimeRef.current = null;
+      setSecondsLeft(longBreakDuration);
+    }
+    prevDurRef.current.lb = longBreakDuration;
+  }, [longBreakDuration, isRunning, mode]);
 
   useEffect(() => {
     // If worker isn't running, use main-thread interval fallback
@@ -316,11 +339,10 @@ export function usePomodoroTimer() {
           const { work_seconds, break_seconds } = json.data;
             if (typeof work_seconds === 'number' && work_seconds > 0) setWorkDuration(work_seconds);
             if (typeof break_seconds === 'number' && break_seconds > 0) setBreakDuration(break_seconds);
-            if (mode === 'work') scheduleEnd(work_seconds);
         }
       } catch { /* offline or server not started */ }
     })();
-  }, [scheduleEnd]);
+  }, []);
 
   // Fetch progress data
   useEffect(() => {

@@ -18,8 +18,17 @@ self.onmessage = (e) => {
     endTime = msg.endTime || null;
     clearTimer();
     if (!endTime) return;
+    // Send an immediate tick for responsiveness
+    {
+      const remainingNow = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
+      self.postMessage({ type: 'tick', remaining: remainingNow });
+      if (remainingNow <= 0) {
+        clearTimer(); endTime = null; self.postMessage({ type: 'done' });
+        return;
+      }
+    }
     intervalId = setInterval(() => {
-      const remaining = Math.max(0, Math.round((endTime - Date.now()) / 1000));
+      const remaining = Math.max(0, Math.ceil((endTime - Date.now()) / 1000));
       self.postMessage({ type: 'tick', remaining });
       if (remaining <= 0) {
         clearTimer();

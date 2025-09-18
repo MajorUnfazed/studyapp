@@ -1,13 +1,15 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
 import { usePomodoroTimer, formatTime } from './hooks/usePomodoroTimer.js';
+import Profile from './pages/Profile.jsx';
 
-export default function App() {
+function TimerPage() {
   const {
     mode, secondsLeft, isRunning, start, pause, reset, workDuration, breakDuration, longBreakDuration, cyclesBeforeLongBreak,
-    updateDurations, progress, achievements, historySummary, heatmap, skip,
+  updateDurations, historySummary, skip,
     autoStartNext, setAutoStartNext,
     notificationsEnabled, setNotificationsEnabled,
-    dailyGoalMinutes, setDailyGoalMinutes,
+  dailyGoalMinutes, setDailyGoalMinutes,
     cycleCount,
     distractionFree, setDistractionFree,
   } = usePomodoroTimer();
@@ -138,6 +140,43 @@ export default function App() {
     pushToast(`Preset applied: ${p.label}`);
   };
 
+  // Lock page scroll and margins in distraction-free to avoid scrollbars (e.g., F11 fullscreen)
+  useEffect(() => {
+    if (!distractionFree) return;
+    const body = document.body;
+    const html = document.documentElement;
+    const prev = {
+      bodyOverflow: body.style.overflow,
+      bodyMargin: body.style.margin,
+      bodyHeight: body.style.height,
+      htmlOverflow: html.style.overflow,
+    };
+    body.style.overflow = 'hidden';
+    body.style.margin = '0';
+    body.style.height = '100vh';
+    html.style.overflow = 'hidden';
+    return () => {
+      body.style.overflow = prev.bodyOverflow;
+      body.style.margin = prev.bodyMargin;
+      body.style.height = prev.bodyHeight;
+      html.style.overflow = prev.htmlOverflow;
+    };
+  }, [distractionFree]);
+
+  // Distraction-free: show only the big timer, nothing else
+  if (distractionFree) {
+    return (
+      <div style={{ fontFamily: 'sans-serif', position: 'fixed', inset: 0, width: '100vw', height: '100vh', overflow: 'hidden', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+        <button
+          onClick={() => setDistractionFree(false)}
+          title="Unhide"
+          style={{ position: 'fixed', top: 12, right: 12, background: '#fff', border: '1px solid #ccc', borderRadius: 6, padding: '6px 10px', cursor: 'pointer' }}
+        >Unhide</button>
+        <div style={{ fontSize: '6rem', letterSpacing: '2px', userSelect: 'none' }}>{formatTime(secondsLeft)}</div>
+      </div>
+    );
+  }
+
   return (
     <div style={{ fontFamily: 'sans-serif', maxWidth: 820, margin: '2rem auto', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
       {(!online || !backendOnline) && (
@@ -150,7 +189,13 @@ export default function App() {
         </div>
       )}
 
-      <h1>Pomodoro</h1>
+      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <h1 style={{ margin: 0 }}>Pomodoro</h1>
+        <nav style={{ display: 'flex', gap: 10 }}>
+          <Link to="/" style={{ textDecoration: 'none' }}>Timer</Link>
+          <Link to="/profile" style={{ textDecoration: 'none' }}>Profile</Link>
+        </nav>
+      </header>
 
       {/* Presets */}
       <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
@@ -206,27 +251,7 @@ export default function App() {
         <p style={{ marginTop: '1.0rem', fontSize: '0.7rem', color: '#555' }}>Current: Work {formatTime(workDuration)} • Break {formatTime(breakDuration)} • Long {formatTime(longBreakDuration)} • Every {cyclesBeforeLongBreak} cycles</p>
       </div>
 
-      {!distractionFree && (
-        <div style={{ display: 'grid', gap: '1rem', gridTemplateColumns: 'repeat(auto-fit, minmax(250px, 1fr))' }}>
-          {/* Daily Goal */}
-          <DailyGoalCard todaySec={todaySec} goalInput={goalInput} setGoalInput={setGoalInput} setDailyGoalMinutes={setDailyGoalMinutes} goalPct={goalPct} />
-
-          {/* Notifications */}
-          <NotificationsCard notificationsEnabled={notificationsEnabled} setNotificationsEnabled={setNotificationsEnabled} permission={permission} requestNotifications={requestNotifications} />
-
-          {/* Progress */}
-          <ProgressCard progress={progress} />
-
-          {/* Achievements */}
-          <AchievementsCard achievements={achievements} />
-
-          {/* Today & 7 Days */}
-          <HistoryCard historySummary={historySummary} />
-
-          {/* Heatmap */}
-          <HeatmapCard heatmap={heatmap} />
-        </div>
-      )}
+  {/* Secondary panels moved to Profile page */}
 
       {/* Toasts */}
       <div style={{ position: 'fixed', right: 16, bottom: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -237,6 +262,17 @@ export default function App() {
         ))}
       </div>
     </div>
+  );
+}
+
+export default function App() {
+  return (
+    <BrowserRouter>
+      <Routes>
+        <Route path="/" element={<TimerPage />} />
+        <Route path="/profile" element={<Profile />} />
+      </Routes>
+    </BrowserRouter>
   );
 }
 
