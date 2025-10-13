@@ -56,4 +56,9 @@ export default defineConfig({
       devOptions: { enabled: true }
     })
   ]
+  ,
+  server: {
+    // Allow this tunneled host during development
+    allowedHosts: ['wfxpum-ip-115-240-199-126.tunnelmole.net']
+  }
 });
