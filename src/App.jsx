@@ -1,5 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { BrowserRouter, Routes, Route, Link } from 'react-router-dom';
+import ThemeToggle from './components/ThemeToggle.jsx';
+import TaskList from './components/TaskList.jsx';
 import { usePomodoroTimer, formatTime } from './hooks/usePomodoroTimer.js';
 import Profile from './pages/Profile.jsx';
 
@@ -178,89 +180,134 @@ function TimerPage() {
   }
 
   return (
-    <div style={{ fontFamily: 'sans-serif', maxWidth: 820, margin: '2rem auto', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+    <div className="min-h-screen bg-base-100 text-base-content">
+      {/* Top bar */}
+      <div className="navbar bg-base-100 border-b">
+        <div className="flex-1">
+          <a className="btn btn-ghost text-xl">Pomodoro</a>
+        </div>
+        <div className="flex-none gap-2">
+          <ul className="menu menu-horizontal px-1">
+            <li><Link to="/">Timer</Link></li>
+            <li><Link to="/profile">Profile</Link></li>
+          </ul>
+          <ThemeToggle />
+        </div>
+      </div>
+
+      {/* Banners */}
       {(!online || !backendOnline) && (
-        <div style={{ background: '#ffecb3', color: '#7a5d00', padding: '6px 10px', border: '1px solid #ffd54f', borderRadius: 4 }}>
-          {!online ? (
-            <>You are offline. Changes will be saved locally and synced when back online.</>
-          ) : (
-            <>Backend is unreachable (http://localhost:4000). Stats, history, and achievements won’t sync until it’s back. The timer still works.</>
-          )}
+        <div className="alert alert-warning rounded-none">
+          <span>
+            {!online
+              ? 'You are offline. Changes will be saved locally and synced when back online.'
+              : 'Backend is unreachable (http://localhost:4000). Stats, history, and achievements won’t sync until it’s back. The timer still works.'}
+          </span>
         </div>
       )}
 
-      <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-        <h1 style={{ margin: 0 }}>Pomodoro</h1>
-        <nav style={{ display: 'flex', gap: 10 }}>
-          <Link to="/" style={{ textDecoration: 'none' }}>Timer</Link>
-          <Link to="/profile" style={{ textDecoration: 'none' }}>Profile</Link>
-        </nav>
-      </header>
+      <main className="container mx-auto p-4 max-w-4xl">
+        {/* Hero timer */}
+        <section className="rounded-2xl shadow-2xl overflow-hidden">
+          <div className={`hero min-h-[360px] ${mode === 'work' ? 'bg-rose-600' : mode === 'break' ? 'bg-emerald-600' : 'bg-sky-700'} text-rose-50`}>
+            <div className="hero-content text-center">
+              <div className="w-full">
+                {/* Mode tabs (read-only indication) */}
+                <div className="tabs tabs-boxed inline-flex">
+                  <span className={`tab ${mode === 'work' ? 'tab-active' : ''}`}>Pomodoro</span>
+                  <span className={`tab ${mode === 'break' ? 'tab-active' : ''}`}>Short Break</span>
+                  <span className={`tab ${mode === 'long' ? 'tab-active' : ''}`}>Long Break</span>
+                </div>
 
-      {/* Presets */}
-      <div style={{ display: 'flex', gap: 8, justifyContent: 'center', flexWrap: 'wrap' }}>
-        {presets.map(p => (
-          <button key={p.label} onClick={() => usePreset(p)}>{p.label}</button>
-        ))}
-        <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, marginLeft: 8, fontSize: '0.85rem' }}>
-          <input type="checkbox" checked={distractionFree} onChange={e => setDistractionFree(e.target.checked)} />
-          Distraction-free
-        </label>
-      </div>
+                <div className="mt-4 text-[72px] md:text-[96px] font-extrabold tracking-wider leading-none drop-shadow-sm">
+                  {formatTime(secondsLeft)}
+                </div>
+                <div className="mt-1 text-sm opacity-90">
+                  {mode === 'work' ? 'Time to focus!' : mode === 'break' ? 'Take a short pause.' : 'Take a long pause.'}
+                  {mode !== 'work' && (
+                    <span className="ml-2 opacity-90">Cycle {cycleCount}/{cyclesBeforeLongBreak}</span>
+                  )}
+                </div>
 
-      <fieldset style={{ border: '1px solid #ccc', padding: '0.75rem', margin: 0 }} disabled={isRunning}>
-        <legend style={{ fontSize: '0.9rem' }}>Durations & Cycles</legend>
-        <div style={{ display: 'flex', gap: '0.75rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-          <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.75rem' }}>
-            Work (s)
-            <input type="number" min={1} value={workInput} onChange={e => setWorkInput(e.target.value)} style={{ width: 88, textAlign: 'center' }} />
-          </label>
-          <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.75rem' }}>
-            Break (s)
-            <input type="number" min={1} value={breakInput} onChange={e => setBreakInput(e.target.value)} style={{ width: 88, textAlign: 'center' }} />
-          </label>
-          <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.75rem' }}>
-            Long Break (s)
-            <input type="number" min={1} value={longBreakInput} onChange={e => setLongBreakInput(e.target.value)} style={{ width: 100, textAlign: 'center' }} />
-          </label>
-          <label style={{ display: 'flex', flexDirection: 'column', fontSize: '0.75rem' }}>
-            Cycles before long
-            <input type="number" min={2} value={cyclesInput} onChange={e => setCyclesInput(e.target.value)} style={{ width: 120, textAlign: 'center' }} />
-          </label>
-          <button type="button" onClick={apply} style={{ alignSelf: 'flex-end', height: 34 }}>Apply</button>
-        </div>
-        <div style={{ marginTop: '0.5rem', fontSize: '0.7rem', color: '#555' }}>Changes disabled while timer running</div>
-      </fieldset>
+                <div className="mt-6 flex flex-wrap justify-center items-center gap-3">
+                  {!isRunning ? (
+                    <button onClick={start} className="btn bg-white text-rose-600 hover:bg-rose-50 border-0 shadow-lg px-8 text-lg">START</button>
+                  ) : (
+                    <button onClick={pause} className="btn bg-white text-rose-600 hover:bg-rose-50 border-0 shadow-lg px-8 text-lg">PAUSE</button>
+                  )}
+                  <button onClick={reset} className="btn btn-ghost normal-case">Reset</button>
+                  <button onClick={skip} className="btn btn-ghost normal-case" title="Skip current interval (no XP)">Skip</button>
+                </div>
 
-      <div>
-        <div style={{ marginBottom: '0.5rem' }}>
-          Mode: <strong>{mode === 'work' ? 'Work' : mode === 'break' ? 'Break' : 'Long Break'}</strong>
-          {mode !== 'work' && <span style={{ marginLeft: 8, fontSize: '0.75rem', color: '#666' }}>Cycle {cycleCount}/{cyclesBeforeLongBreak}</span>}
-        </div>
-        <div style={{ fontSize: '3rem', margin: '1rem 0', letterSpacing: '2px' }}>{formatTime(secondsLeft)}</div>
-        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'center', flexWrap: 'wrap', alignItems: 'center' }}>
-          {!isRunning && (<button onClick={start}>Start</button>)}
-          {isRunning && (<button onClick={pause}>Pause</button>)}
-          <button onClick={reset}>Reset</button>
-          <button onClick={skip} title="Skip current interval (no XP)">Skip</button>
-          <label style={{ display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: '0.8rem', marginLeft: 8 }}>
-            <input type="checkbox" checked={autoStartNext} onChange={e => setAutoStartNext(e.target.checked)} />
-            Auto-start next
-          </label>
-        </div>
-        <p style={{ marginTop: '1.0rem', fontSize: '0.7rem', color: '#555' }}>Current: Work {formatTime(workDuration)} • Break {formatTime(breakDuration)} • Long {formatTime(longBreakDuration)} • Every {cyclesBeforeLongBreak} cycles</p>
-      </div>
-
-  {/* Secondary panels moved to Profile page */}
-
-      {/* Toasts */}
-      <div style={{ position: 'fixed', right: 16, bottom: 16, display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {toasts.map(t => (
-          <div key={t.id} style={{ background: '#333', color: '#fff', padding: '8px 12px', borderRadius: 6, boxShadow: '0 2px 8px rgba(0,0,0,0.2)', fontSize: '0.85rem' }}>
-            {t.msg}
+                <div className="mt-3 inline-flex items-center text-sm opacity-90">
+                  <input type="checkbox" className="checkbox checkbox-sm mr-2" checked={autoStartNext} onChange={e => setAutoStartNext(e.target.checked)} />
+                  Auto-start next
+                </div>
+              </div>
+            </div>
           </div>
-        ))}
-      </div>
+        </section>
+
+        {/* Presets & Settings */}
+        <div className="mt-6 grid grid-cols-1 gap-4">
+          <div className="card bg-base-200">
+            <div className="card-body">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  {presets.map(p => (
+                    <button key={p.label} className="btn btn-sm" onClick={() => usePreset(p)}>{p.label}</button>
+                  ))}
+                </div>
+                <label className="label cursor-pointer text-sm">
+                  <input type="checkbox" className="toggle mr-2" checked={distractionFree} onChange={e => setDistractionFree(e.target.checked)} />
+                  Distraction-free
+                </label>
+              </div>
+              <fieldset disabled={isRunning} className="mt-3 grid grid-cols-2 md:grid-cols-5 gap-4 items-end">
+                <label className="form-control">
+                  <span className="label-text">Work (s)</span>
+                  <input type="number" min={1} value={workInput} onChange={e => setWorkInput(e.target.value)} className="input input-bordered" />
+                </label>
+                <label className="form-control">
+                  <span className="label-text">Break (s)</span>
+                  <input type="number" min={1} value={breakInput} onChange={e => setBreakInput(e.target.value)} className="input input-bordered" />
+                </label>
+                <label className="form-control">
+                  <span className="label-text">Long (s)</span>
+                  <input type="number" min={1} value={longBreakInput} onChange={e => setLongBreakInput(e.target.value)} className="input input-bordered" />
+                </label>
+                <label className="form-control">
+                  <span className="label-text">Cycles</span>
+                  <input type="number" min={2} value={cyclesInput} onChange={e => setCyclesInput(e.target.value)} className="input input-bordered" />
+                </label>
+                <div className="md:col-span-1">
+                  <button type="button" onClick={apply} className="btn btn-primary w-full">Apply</button>
+                </div>
+              </fieldset>
+              {isRunning && <div className="mt-1 text-sm opacity-70">Changes disabled while timer runs</div>}
+              <div className="mt-2 text-sm opacity-70">Current: Work {formatTime(workDuration)} • Break {formatTime(breakDuration)} • Long {formatTime(longBreakDuration)} • Every {cyclesBeforeLongBreak} cycles</div>
+            </div>
+          </div>
+        </div>
+
+        {/* Tasks */}
+        <TaskList />
+
+        {/* Toasts */}
+        <div className="toast toast-end">
+          {toasts.map(t => (
+            <div key={t.id} className={`alert ${t.type === 'info' ? 'alert-info' : t.type === 'success' ? 'alert-success' : t.type === 'warning' ? 'alert-warning' : 'alert-error'}`}>
+              <span>{t.msg}</span>
+            </div>
+          ))}
+        </div>
+      </main>
+
+      <footer className="footer footer-center p-4 bg-base-200 text-base-content mt-10">
+        <aside>
+          <p>© {new Date().getFullYear()} Pomodoro</p>
+        </aside>
+      </footer>
     </div>
   );
 }

@@ -1,5 +1,6 @@
 import colors from 'tailwindcss/colors';
 import forms from '@tailwindcss/forms';
+import daisyui from 'daisyui';
 
 /** @type {import('tailwindcss').Config} */
 export default {
@@ -32,5 +33,20 @@ export default {
   },
   plugins: [
     forms,
+    daisyui,
   ],
+  daisyui: {
+    themes: [
+      {
+        winter: {
+          ...require('daisyui/src/theming/themes')['[data-theme=winter]'],
+        },
+      },
+      {
+        business: {
+          ...require('daisyui/src/theming/themes')['[data-theme=business]'],
+        },
+      },
+    ],
+  },
 }
