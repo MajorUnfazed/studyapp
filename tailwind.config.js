@@ -22,7 +22,7 @@ export default {
         'light-border': 'hsl(0 0% 90%)',
 
         'dark-bg': 'hsl(0 0% 5%)',
-        'dark-surface': 'hsl(0 0% 10%)',
+        'dark-surface': 'hsl(0 0% 10%)',  
         'dark-text': 'hsl(0 0% 95%)',
         'dark-text-muted': 'hsl(0 0% 60%)',
         'dark-accent': 'hsl(186 98% 52%)',
