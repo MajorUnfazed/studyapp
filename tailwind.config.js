@@ -36,17 +36,6 @@ export default {
     daisyui,
   ],
   daisyui: {
-    themes: [
-      {
-        winter: {
-          ...require('daisyui/src/theming/themes')['[data-theme=winter]'],
-        },
-      },
-      {
-        business: {
-          ...require('daisyui/src/theming/themes')['[data-theme=business]'],
-        },
-      },
-    ],
+    themes: ['winter', 'business'],
   },
 }

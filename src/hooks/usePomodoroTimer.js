@@ -247,6 +247,17 @@ export function usePomodoroTimer() {
     endTimeRef.current = null;
   }, []);
 
+  // Manually select a mode (no sounds/xp, paused by default)
+  const selectMode = useCallback((next) => {
+    const valid = next === 'work' || next === 'break' || next === 'longBreak' ? next : 'work';
+    const nextSeconds = valid === 'work' ? workDuration : (valid === 'break' ? breakDuration : longBreakDuration);
+    setIsRunning(false);
+    endTimeRef.current = null;
+    sessionStartRef.current = null;
+    setMode(valid);
+    setSecondsLeft(nextSeconds);
+  }, [workDuration, breakDuration, longBreakDuration]);
+
   const reset = useCallback(() => {
     setIsRunning(false);
     setMode('work');
@@ -432,6 +443,7 @@ export function usePomodoroTimer() {
     pause,
     reset,
     skip,
+    selectMode,
     workDuration,
     breakDuration,
     longBreakDuration,

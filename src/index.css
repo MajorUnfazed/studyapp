@@ -2,8 +2,5 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Global theme-aware background */
+/* Ensure full-height layout */
 html, body, #root { height: 100%; }
-body {
-	@apply bg-gradient-to-b from-base-200 to-base-100 text-base-content;
-}

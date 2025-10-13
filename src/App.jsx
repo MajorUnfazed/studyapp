@@ -8,7 +8,7 @@ import Profile from './pages/Profile.jsx';
 function TimerPage() {
   const {
     mode, secondsLeft, isRunning, start, pause, reset, workDuration, breakDuration, longBreakDuration, cyclesBeforeLongBreak,
-  updateDurations, historySummary, skip,
+  updateDurations, historySummary, skip, selectMode,
     autoStartNext, setAutoStartNext,
     notificationsEnabled, setNotificationsEnabled,
   dailyGoalMinutes, setDailyGoalMinutes,
@@ -214,9 +214,9 @@ function TimerPage() {
               <div className="w-full">
                 {/* Mode tabs (read-only indication) */}
                 <div className="tabs tabs-boxed inline-flex">
-                  <span className={`tab ${mode === 'work' ? 'tab-active' : ''}`}>Pomodoro</span>
-                  <span className={`tab ${mode === 'break' ? 'tab-active' : ''}`}>Short Break</span>
-                  <span className={`tab ${mode === 'long' ? 'tab-active' : ''}`}>Long Break</span>
+                  <button className={`tab ${mode === 'work' ? 'tab-active' : ''}`} onClick={() => selectMode('work')}>Pomodoro</button>
+                  <button className={`tab ${mode === 'break' ? 'tab-active' : ''}`} onClick={() => selectMode('break')}>Short Break</button>
+                  <button className={`tab ${mode === 'longBreak' ? 'tab-active' : ''}`} onClick={() => selectMode('longBreak')}>Long Break</button>
                 </div>
 
                 <div className="mt-4 text-[72px] md:text-[96px] font-extrabold tracking-wider leading-none drop-shadow-sm">
@@ -291,7 +291,7 @@ function TimerPage() {
         </div>
 
         {/* Tasks */}
-        <TaskList />
+  <SmartTaskList />
 
         {/* Toasts */}
         <div className="toast toast-end">
@@ -320,6 +320,48 @@ export default function App() {
         <Route path="/profile" element={<Profile />} />
       </Routes>
     </BrowserRouter>
+  );
+}
+
+// Simple persistent task list (localStorage) to support adding tasks now
+function SmartTaskList() {
+  const [tasks, setTasks] = React.useState(() => {
+    try { return JSON.parse(localStorage.getItem('tasks_v1') || '[]'); } catch { return []; }
+  });
+  const [text, setText] = React.useState('');
+  React.useEffect(() => {
+    try { localStorage.setItem('tasks_v1', JSON.stringify(tasks)); } catch {}
+  }, [tasks]);
+
+  const add = () => {
+    const t = text.trim();
+    if (!t) return;
+    setTasks(prev => [...prev, { id: Date.now(), text: t, completed: false }]);
+    setText('');
+  };
+  const toggle = (id) => setTasks(prev => prev.map(x => x.id === id ? { ...x, completed: !x.completed } : x));
+  const remove = (id) => setTasks(prev => prev.filter(x => x.id !== id));
+
+  return (
+    <div className="card bg-base-100 shadow mt-8">
+      <div className="card-body">
+        <h3 className="card-title">Task List</h3>
+        <div className="join w-full">
+          <input className="input input-bordered join-item w-full" placeholder="Add a new task" value={text} onChange={e => setText(e.target.value)} onKeyDown={e => e.key === 'Enter' && add()} />
+          <button className="btn btn-primary join-item" onClick={add}>Add</button>
+        </div>
+        <ul className="mt-4 space-y-2">
+          {tasks.map(t => (
+            <li key={t.id} className="flex items-center gap-3">
+              <input type="checkbox" className="checkbox" checked={t.completed} onChange={() => toggle(t.id)} />
+              <span className={t.completed ? 'line-through opacity-60' : ''}>{t.text}</span>
+              <button className="btn btn-ghost btn-xs ml-auto" onClick={() => remove(t.id)}>Remove</button>
+            </li>
+          ))}
+          {!tasks.length && <li className="opacity-60 text-sm">No tasks yet. Add your first focus task.</li>}
+        </ul>
+      </div>
+    </div>
   );
 }
 
